@@ -78,6 +78,23 @@ mermaid.initialize({
 let renderCount = 0;
 
 /**
+ * Mermaid's "base" theme (`theme-base.js`, `updateColors()`) computes its
+ * mindmap section palette (`cScale0`-`cScale11`) and gitGraph branch palette
+ * (`git0`-`git7`) by hue-rotating `primaryColor`, then UNCONDITIONALLY darkens
+ * every one of those slots by 25% (light mode) or 75% (dark mode) — a no-op
+ * against its own light pastel defaults, but devastating against an
+ * already-dark `theme.surface`: every mindmap section/gitGraph branch renders
+ * near-black regardless of what theme is active (observed: a mindmap in dark
+ * mode showed solid black boxes for every node). `mermaidAPI`'s
+ * `calculate(overrides)` re-applies the override object a SECOND time right
+ * after computing all of this, for exactly the keys present in it — so
+ * setting these slots explicitly (below) survives the auto-darken pass
+ * instead of feeding it.
+ */
+const MINDMAP_SECTION_COUNT = 12; // cScale0-11 — matches Theme.THEME_COLOR_LIMIT / mindmap's MAX_SECTIONS.
+const GITGRAPH_BRANCH_COUNT = 8; // git0-7 — matches Theme's own git branch palette size.
+
+/**
  * Mapea los 8 slots genéricos de `PluginThemeContext` a los `themeVariables`
  * propios de Mermaid.
  *
@@ -92,9 +109,21 @@ let renderCount = 0;
  * `attributeBackgroundColorOdd`/`Even` (ER diagram, filas de atributos de
  * cada entidad) son otro caso igual: Mermaid las deja fijas en blanco/gris
  * clarísimo por defecto, sin caer a ningún otro themeVariable.
+ *
+ * `cScale*`/`git*` (mindmap sections, gitGraph branches): ver comentario de
+ * `MINDMAP_SECTION_COUNT` arriba. Sin paleta de acento por rama disponible en
+ * `PluginThemeContext` (no trae más que un `accent` — no hay forma de generar
+ * N tonos distinguibles sin inventar matemática de color que nadie pidió), se
+ * alternan `surface`/`surfaceMuted` — los dos tonos de superficie que el
+ * resto de la app ya da por seguros contra `text` (mismo par que usa
+ * `attributeBackgroundColorOdd`/`Even` arriba). `cScaleInv`/`gitInv` (trazo
+ * de los conectores) van a `border` en vez de heredar el `invert()` que
+ * Mermaid calcularía sobre el valor YA oscurecido (ese cálculo corre antes de
+ * que el override de abajo lo pueda pisar).
  */
 function themeVariablesFrom(theme: PluginThemeContext): Record<string, string> {
-  return {
+  const sectionFills = [theme.surface, theme.surfaceMuted];
+  const variables: Record<string, string> = {
     background: theme.background,
     primaryColor: theme.surface,
     primaryTextColor: theme.text,
@@ -105,6 +134,17 @@ function themeVariablesFrom(theme: PluginThemeContext): Record<string, string> {
     attributeBackgroundColorOdd: theme.surface,
     attributeBackgroundColorEven: theme.surfaceMuted,
   };
+  for (let i = 0; i < MINDMAP_SECTION_COUNT; i++) {
+    variables[`cScale${i}`] = sectionFills[i % sectionFills.length];
+    variables[`cScaleLabel${i}`] = theme.text;
+    variables[`cScaleInv${i}`] = theme.border;
+  }
+  for (let i = 0; i < GITGRAPH_BRANCH_COUNT; i++) {
+    variables[`git${i}`] = sectionFills[i % sectionFills.length];
+    variables[`gitBranchLabel${i}`] = theme.text;
+    variables[`gitInv${i}`] = theme.border;
+  }
+  return variables;
 }
 
 /**

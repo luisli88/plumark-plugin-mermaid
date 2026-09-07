@@ -187046,8 +187046,11 @@ mermaid_default.initialize({
   }
 });
 var renderCount = 0;
+var MINDMAP_SECTION_COUNT = 12;
+var GITGRAPH_BRANCH_COUNT = 8;
 function themeVariablesFrom(theme) {
-  return {
+  const sectionFills = [theme.surface, theme.surfaceMuted];
+  const variables = {
     background: theme.background,
     primaryColor: theme.surface,
     primaryTextColor: theme.text,
@@ -187058,6 +187061,17 @@ function themeVariablesFrom(theme) {
     attributeBackgroundColorOdd: theme.surface,
     attributeBackgroundColorEven: theme.surfaceMuted
   };
+  for (let i4 = 0; i4 < MINDMAP_SECTION_COUNT; i4++) {
+    variables[`cScale${i4}`] = sectionFills[i4 % sectionFills.length];
+    variables[`cScaleLabel${i4}`] = theme.text;
+    variables[`cScaleInv${i4}`] = theme.border;
+  }
+  for (let i4 = 0; i4 < GITGRAPH_BRANCH_COUNT; i4++) {
+    variables[`git${i4}`] = sectionFills[i4 % sectionFills.length];
+    variables[`gitBranchLabel${i4}`] = theme.text;
+    variables[`gitInv${i4}`] = theme.border;
+  }
+  return variables;
 }
 var INIT_DIRECTIVE_PATTERN = /%%\{\s*init(?:ialize)?\s*:[\s\S]*?\}%%/g;
 function stripInitDirectives(source) {
