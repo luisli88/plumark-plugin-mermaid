@@ -187102,8 +187102,8 @@ function themeVariablesFrom(theme) {
     lineColor: theme.textMuted,
     secondaryColor: theme.surfaceMuted,
     tertiaryColor: theme.background,
-    attributeBackgroundColorOdd: theme.surface,
-    attributeBackgroundColorEven: theme.surfaceMuted
+    rowOdd: theme.surface,
+    rowEven: theme.surfaceMuted
   };
   const fills2 = CATEGORICAL_HUES.map((hue2) => bestFillFor(hue2, theme.mode, theme.background));
   for (let i4 = 0; i4 < MINDMAP_SECTION_COUNT; i4++) {

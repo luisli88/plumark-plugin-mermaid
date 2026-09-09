@@ -207,9 +207,23 @@ function inkFor(fill: string): string {
  * sobreescribirla quedaba fija en el gris claro por defecto de Mermaid
  * (`#f4f4f4`) sin importar el tema.
  *
- * `attributeBackgroundColorOdd`/`Even` (ER diagram, filas de atributos de
- * cada entidad) son otro caso igual: Mermaid las deja fijas en blanco/gris
- * clarísimo por defecto, sin caer a ningún otro themeVariable.
+ * `rowOdd`/`rowEven` (ER diagram, filas de atributos de cada entidad —
+ * verificado leyendo el propio código fuente de `mermaid` instalado, no
+ * documentación: la variable real en esta versión es esta, `mermaid` no
+ * `attributeBackgroundColorOdd`/`Even` como asumía una versión anterior de
+ * este mapeo. Esa pareja de nombres quedó muerta — nunca tocaba nada, así
+ * que las filas caían al `rowOdd`/`rowEven` DEFAULT de Mermaid, sin relación
+ * con el tema activo — que explica el bug reportado: el texto de cada
+ * atributo usa un único color fijo (`textColor`) para las 2 filas
+ * alternadas, así que ambas necesitan quedar del lado correcto de ESE color,
+ * no solo diferenciarse entre sí. `surface`/`surfaceMuted` (los mismos dos
+ * tonos "de card" que la app ya da por seguros contra `text` en todo el
+ * resto de la UI, ver el `sidebarBg`/`bgCard` que los originan) cumplen
+ * justo eso — a diferencia de la paleta categórica de mindmap/gitGraph de
+ * abajo, acá SÍ corresponde alternar dos tonos de superficie: nunca hay más
+ * de 2 filas visibles a la vez por la alternancia par/impar, así que no hace
+ * falta distinguir N vecinos entre sí, solo mantener el mismo texto legible
+ * en ambas.
  *
  * `cScale*`/`git*` (mindmap sections, gitGraph branches): ver el comentario de
  * "Paleta categórica" arriba — `bestFillFor()`/`inkFor()` reemplazan el
@@ -230,8 +244,8 @@ function themeVariablesFrom(theme: PluginThemeContext): Record<string, string> {
     lineColor: theme.textMuted,
     secondaryColor: theme.surfaceMuted,
     tertiaryColor: theme.background,
-    attributeBackgroundColorOdd: theme.surface,
-    attributeBackgroundColorEven: theme.surfaceMuted,
+    rowOdd: theme.surface,
+    rowEven: theme.surfaceMuted,
   };
 
   const fills = CATEGORICAL_HUES.map((hue) => bestFillFor(hue, theme.mode, theme.background));
