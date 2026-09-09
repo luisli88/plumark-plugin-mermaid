@@ -94,6 +94,107 @@ let renderCount = 0;
 const MINDMAP_SECTION_COUNT = 12; // cScale0-11 — matches Theme.THEME_COLOR_LIMIT / mindmap's MAX_SECTIONS.
 const GITGRAPH_BRANCH_COUNT = 8; // git0-7 — matches Theme's own git branch palette size.
 
+// -- Paleta categórica para mindmap/gitGraph --------------------------------
+//
+// La primera versión de este mapeo alternaba `surface`/`surfaceMuted` para
+// estos slots (siguen usándose para todo lo demás, ver `themeVariablesFrom`)
+// — dos tonos de "elevación de card" pensados para diferenciarse apenas del
+// fondo, no para servir de paleta categórica. Contra un `background` oscuro
+// (`theme.surface`/`surfaceMuted` de un tema oscuro típico son solo un poco
+// más claros que `background`), el resultado reportado por Luis fue el mismo
+// bug de siempre en otra forma: cajas de mindmap y ramas de gitGraph casi
+// invisibles contra la página, y sin poder distinguir una rama/sección de la
+// de al lado (ambas cayendo en el mismo tono alternado).
+//
+// La paleta de abajo reusa los 8 tonos categóricos ya validados del propio
+// sistema de diseño (dataviz skill, `references/palette.md`: separación CVD
+// adjacente >=8 ΔE OKLab en ambos modos) — cada tono trae un paso "claro" y
+// uno "oscuro" ya probados contra las superficies de referencia del sistema.
+// `theme.mode` decide qué columna usar (los 8 pasos de una misma columna
+// mantienen entre sí la banda de luminosidad que el validador exige — mezclar
+// columnas por slot, aunque cada mezcla individual contrastara bien, dejaba
+// slots visiblemente más claros que sus vecinos). El paso de la OTRA columna
+// solo entra como red de emergencia si el de la columna activa no llega ni a
+// 3:1 contra `theme.background` — que puede ser cualquier tema instalado por
+// el usuario (ej. uno importado de VS Code), no solo los presets propios de
+// la app. El texto/ícono DENTRO de cada sección (`cScaleLabel*`) se resuelve
+// aparte: negro o blanco casi puro, el que más contraste dé contra el
+// relleno ya elegido — nunca `theme.text` a ciegas, que podía terminar siendo
+// texto claro sobre un relleno igual de claro.
+const WCAG_MIN_FILL_CONTRAST = 3; // mismo piso que usa el validador del propio sistema de diseño.
+const NEAR_BLACK_INK = '#0a0a0a';
+const NEAR_WHITE_INK = '#fafafa';
+
+/** sRGB (0-1 por canal) desde un hex de 6 dígitos. */
+function hexToSrgb(hex: string): [number, number, number] {
+  const clean = hex.replace('#', '');
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(clean.slice(i, i + 2), 16) / 255);
+  return [r!, g!, b!];
+}
+
+function srgbToLinear(channel: number): number {
+  return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+}
+
+/** Luminancia relativa WCAG — misma fórmula que usa el validador de paletas del sistema de diseño. */
+function relativeLuminance(hex: string): number {
+  const [r, g, b] = hexToSrgb(hex).map(srgbToLinear);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Ratio de contraste WCAG (1-21) entre dos colores, sin importar el orden. */
+function contrastRatio(hexA: string, hexB: string): number {
+  const [high, low] = [relativeLuminance(hexA), relativeLuminance(hexB)].sort((a, b) => b - a);
+  return (high + 0.05) / (low + 0.05);
+}
+
+/**
+ * Ocho familias de matiz en orden fijo (canal de identidad — nunca se ciclan
+ * para una 9na serie *estadística*; acá se reciclan del slot 0 en adelante
+ * recién a partir de la sección 8 de un mindmap, ver el loop de abajo, porque
+ * un mindmap con más de 8 ramas de nivel superior es raro y "dos ramas lejanas
+ * comparten tono" es un compromiso menor comparado con el bug actual). Pasos
+ * claro/oscuro reusados tal cual del validador de paletas del sistema de
+ * diseño (dataviz skill) — separación CVD adjacente ya probada en ambos modos.
+ */
+const CATEGORICAL_HUES: ReadonlyArray<{ light: string; dark: string }> = [
+  { light: '#2a78d6', dark: '#3987e5' }, // azul
+  { light: '#eb6834', dark: '#d95926' }, // naranja
+  { light: '#1baf7a', dark: '#199e70' }, // aqua
+  { light: '#eda100', dark: '#c98500' }, // amarillo
+  { light: '#e87ba4', dark: '#d55181' }, // magenta
+  { light: '#008300', dark: '#008300' }, // verde
+  { light: '#4a3aa7', dark: '#9085e9' }, // violeta
+  { light: '#e34948', dark: '#e66767' }, // rojo
+];
+
+/**
+ * El paso de este matiz para el modo activo — el mismo `theme.mode` decide
+ * TODOS los slots a la vez (nunca uno de cada columna: eso rompía la banda de
+ * luminosidad consistente que el propio validador de paletas exige entre
+ * pares — un slot inusualmente claro al lado de otros medios se lee
+ * "descolorido" frente al resto). El otro paso queda como red de emergencia
+ * exclusivamente para el caso borde en que el paso del modo activo no llegue
+ * ni a 3:1 contra el fondo real (ej. un tema oscuro importado con un fondo
+ * poco oscuro) — active solo entonces, nunca por preferencia de contraste.
+ */
+function bestFillFor(
+  hue: { light: string; dark: string },
+  mode: PluginThemeContext['mode'],
+  background: string,
+): string {
+  const preferred = mode === 'dark' ? hue.dark : hue.light;
+  const fallback = mode === 'dark' ? hue.light : hue.dark;
+  return contrastRatio(preferred, background) >= WCAG_MIN_FILL_CONTRAST ? preferred : fallback;
+}
+
+/** Negro o blanco casi puro, el que más contraste dé para texto sobre este relleno puntual. */
+function inkFor(fill: string): string {
+  return contrastRatio(NEAR_BLACK_INK, fill) >= contrastRatio(NEAR_WHITE_INK, fill)
+    ? NEAR_BLACK_INK
+    : NEAR_WHITE_INK;
+}
+
 /**
  * Mapea los 8 slots genéricos de `PluginThemeContext` a los `themeVariables`
  * propios de Mermaid.
@@ -110,19 +211,17 @@ const GITGRAPH_BRANCH_COUNT = 8; // git0-7 — matches Theme's own git branch pa
  * cada entidad) son otro caso igual: Mermaid las deja fijas en blanco/gris
  * clarísimo por defecto, sin caer a ningún otro themeVariable.
  *
- * `cScale*`/`git*` (mindmap sections, gitGraph branches): ver comentario de
- * `MINDMAP_SECTION_COUNT` arriba. Sin paleta de acento por rama disponible en
- * `PluginThemeContext` (no trae más que un `accent` — no hay forma de generar
- * N tonos distinguibles sin inventar matemática de color que nadie pidió), se
- * alternan `surface`/`surfaceMuted` — los dos tonos de superficie que el
- * resto de la app ya da por seguros contra `text` (mismo par que usa
- * `attributeBackgroundColorOdd`/`Even` arriba). `cScaleInv`/`gitInv` (trazo
- * de los conectores) van a `border` en vez de heredar el `invert()` que
+ * `cScale*`/`git*` (mindmap sections, gitGraph branches): ver el comentario de
+ * "Paleta categórica" arriba — `bestFillFor()`/`inkFor()` reemplazan el
+ * alternado `surface`/`surfaceMuted` de antes. `cScaleInv`/`gitInv` (trazo de
+ * los conectores) siguen yendo a `text` (antes `border`: mismo motivo — con la
+ * paleta nueva conviene el color de texto normal, ya garantizado legible
+ * contra `background` en cualquier tema bien formado, en vez de un borde
+ * pensado para líneas divisorias sutiles) en vez de heredar el `invert()` que
  * Mermaid calcularía sobre el valor YA oscurecido (ese cálculo corre antes de
  * que el override de abajo lo pueda pisar).
  */
 function themeVariablesFrom(theme: PluginThemeContext): Record<string, string> {
-  const sectionFills = [theme.surface, theme.surfaceMuted];
   const variables: Record<string, string> = {
     background: theme.background,
     primaryColor: theme.surface,
@@ -134,14 +233,19 @@ function themeVariablesFrom(theme: PluginThemeContext): Record<string, string> {
     attributeBackgroundColorOdd: theme.surface,
     attributeBackgroundColorEven: theme.surfaceMuted,
   };
+
+  const fills = CATEGORICAL_HUES.map((hue) => bestFillFor(hue, theme.mode, theme.background));
+
   for (let i = 0; i < MINDMAP_SECTION_COUNT; i++) {
-    variables[`cScale${i}`] = sectionFills[i % sectionFills.length];
-    variables[`cScaleLabel${i}`] = theme.text;
-    variables[`cScaleInv${i}`] = theme.border;
+    const fill = fills[i % fills.length]!;
+    variables[`cScale${i}`] = fill;
+    variables[`cScaleLabel${i}`] = inkFor(fill);
+    variables[`cScaleInv${i}`] = theme.text;
   }
   for (let i = 0; i < GITGRAPH_BRANCH_COUNT; i++) {
-    variables[`git${i}`] = sectionFills[i % sectionFills.length];
-    variables[`gitBranchLabel${i}`] = theme.text;
+    const fill = fills[i]!;
+    variables[`git${i}`] = fill;
+    variables[`gitBranchLabel${i}`] = inkFor(fill);
     variables[`gitInv${i}`] = theme.border;
   }
   return variables;

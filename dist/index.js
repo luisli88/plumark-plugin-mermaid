@@ -187048,8 +187048,52 @@ mermaid_default.initialize({
 var renderCount = 0;
 var MINDMAP_SECTION_COUNT = 12;
 var GITGRAPH_BRANCH_COUNT = 8;
+var WCAG_MIN_FILL_CONTRAST = 3;
+var NEAR_BLACK_INK = "#0a0a0a";
+var NEAR_WHITE_INK = "#fafafa";
+function hexToSrgb(hex2) {
+  const clean = hex2.replace("#", "");
+  const [r2, g2, b3] = [0, 2, 4].map((i4) => parseInt(clean.slice(i4, i4 + 2), 16) / 255);
+  return [r2, g2, b3];
+}
+function srgbToLinear(channel2) {
+  return channel2 <= 0.04045 ? channel2 / 12.92 : ((channel2 + 0.055) / 1.055) ** 2.4;
+}
+function relativeLuminance(hex2) {
+  const [r2, g2, b3] = hexToSrgb(hex2).map(srgbToLinear);
+  return 0.2126 * r2 + 0.7152 * g2 + 0.0722 * b3;
+}
+function contrastRatio(hexA, hexB) {
+  const [high, low] = [relativeLuminance(hexA), relativeLuminance(hexB)].sort((a2, b3) => b3 - a2);
+  return (high + 0.05) / (low + 0.05);
+}
+var CATEGORICAL_HUES = [
+  { light: "#2a78d6", dark: "#3987e5" },
+  // azul
+  { light: "#eb6834", dark: "#d95926" },
+  // naranja
+  { light: "#1baf7a", dark: "#199e70" },
+  // aqua
+  { light: "#eda100", dark: "#c98500" },
+  // amarillo
+  { light: "#e87ba4", dark: "#d55181" },
+  // magenta
+  { light: "#008300", dark: "#008300" },
+  // verde
+  { light: "#4a3aa7", dark: "#9085e9" },
+  // violeta
+  { light: "#e34948", dark: "#e66767" }
+  // rojo
+];
+function bestFillFor(hue2, mode, background) {
+  const preferred = mode === "dark" ? hue2.dark : hue2.light;
+  const fallback = mode === "dark" ? hue2.light : hue2.dark;
+  return contrastRatio(preferred, background) >= WCAG_MIN_FILL_CONTRAST ? preferred : fallback;
+}
+function inkFor(fill) {
+  return contrastRatio(NEAR_BLACK_INK, fill) >= contrastRatio(NEAR_WHITE_INK, fill) ? NEAR_BLACK_INK : NEAR_WHITE_INK;
+}
 function themeVariablesFrom(theme) {
-  const sectionFills = [theme.surface, theme.surfaceMuted];
   const variables = {
     background: theme.background,
     primaryColor: theme.surface,
@@ -187061,14 +187105,17 @@ function themeVariablesFrom(theme) {
     attributeBackgroundColorOdd: theme.surface,
     attributeBackgroundColorEven: theme.surfaceMuted
   };
+  const fills2 = CATEGORICAL_HUES.map((hue2) => bestFillFor(hue2, theme.mode, theme.background));
   for (let i4 = 0; i4 < MINDMAP_SECTION_COUNT; i4++) {
-    variables[`cScale${i4}`] = sectionFills[i4 % sectionFills.length];
-    variables[`cScaleLabel${i4}`] = theme.text;
-    variables[`cScaleInv${i4}`] = theme.border;
+    const fill = fills2[i4 % fills2.length];
+    variables[`cScale${i4}`] = fill;
+    variables[`cScaleLabel${i4}`] = inkFor(fill);
+    variables[`cScaleInv${i4}`] = theme.text;
   }
   for (let i4 = 0; i4 < GITGRAPH_BRANCH_COUNT; i4++) {
-    variables[`git${i4}`] = sectionFills[i4 % sectionFills.length];
-    variables[`gitBranchLabel${i4}`] = theme.text;
+    const fill = fills2[i4];
+    variables[`git${i4}`] = fill;
+    variables[`gitBranchLabel${i4}`] = inkFor(fill);
     variables[`gitInv${i4}`] = theme.border;
   }
   return variables;
