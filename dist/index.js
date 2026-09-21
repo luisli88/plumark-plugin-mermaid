@@ -187261,7 +187261,11 @@ function mountEditor(options2) {
   }
   renderPreview(options2.initialSource);
   updateHighlight(options2.initialSource);
-  textarea.addEventListener("input", scheduleRender);
+  function handleInput() {
+    options2.onChange?.(textarea.value);
+    scheduleRender();
+  }
+  textarea.addEventListener("input", handleInput);
   textarea.addEventListener("scroll", syncHighlightScroll);
   function commit2() {
     if (debounceTimer) clearTimeout(debounceTimer);
@@ -187280,6 +187284,7 @@ function mountEditor(options2) {
       textarea.value = `${value2.slice(0, selectionStart)}	${value2.slice(selectionEnd)}`;
       textarea.selectionStart = selectionStart + 1;
       textarea.selectionEnd = selectionStart + 1;
+      options2.onChange?.(textarea.value);
       scheduleRender();
     }
   });
@@ -187287,6 +187292,7 @@ function mountEditor(options2) {
   return {
     destroy() {
       if (debounceTimer) clearTimeout(debounceTimer);
+      textarea.removeEventListener("input", handleInput);
     }
   };
 }
