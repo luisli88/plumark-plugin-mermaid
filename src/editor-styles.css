@@ -5,9 +5,13 @@ body {
   background: transparent;
 }
 
+/* 008-plugin-edit-mode: este iframe ahora siempre llena el modal a pantalla completa del host
+   (nunca más un espacio angosto inline, PluginEditorSandbox.open) — lado a lado, igual que el
+   editor genérico del host en el mismo contexto (diagram-edit-mode.ts). */
 .mermaid-edit-mode {
   display: grid;
-  grid-template-rows: auto auto;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
   gap: 12px;
   height: 100%;
   box-sizing: border-box;
