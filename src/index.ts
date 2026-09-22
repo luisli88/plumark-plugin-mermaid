@@ -311,6 +311,9 @@ interface PluginEditorSession {
   destroy(): void;
 }
 
+/** Mismo shape que `PluginPreviewRenderResult` de `@plumark/plugin-sdk`. */
+type PluginPreviewRenderResult = { ok: true; html: string; css?: string } | { ok: false; error: string };
+
 /** Mismo shape que `PluginEditorMountOptions` de `@plumark/plugin-sdk`. */
 interface PluginEditorMountOptions {
   container: HTMLElement;
@@ -321,6 +324,11 @@ interface PluginEditorMountOptions {
    * historial de deshacer/rehacer/restablecer del host (FR-016), con la misma granularidad que el
    * `input` del textarea del editor genérico. */
   onChange?: (source: string) => void;
+  /** 008-plugin-edit-mode (fase 2): si está presente, este `mountEditor` NO monta su propio panel
+   * de vista previa — reporta cada render acá en su lugar, para que un contenedor nativo separado
+   * (Apple App) lo muestre con su propio pan/zoom. Sin esto (Desktop App), sigue con el panel de
+   * preview propio, como siempre. */
+  onPreviewRender?: (result: PluginPreviewRenderResult) => void;
 }
 
 const EDITOR_DEBOUNCE_MS = 300;
@@ -553,10 +561,20 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
   textarea.autofocus = true;
   codePane.append(highlightPre, textarea);
 
-  const previewPane = document.createElement("div");
-  previewPane.className = "mermaid-edit-preview-pane";
+  // 008-plugin-edit-mode (fase 2): con `onPreviewRender`, este editor nunca dibuja su propio panel
+  // de vista previa — un contenedor nativo separado (Apple App) lo reemplaza por completo,
+  // reportando cada render en su lugar (ver `renderPreview` más abajo). Sin esto (Desktop App),
+  // sigue exactamente igual que antes.
+  const reportsPreviewSeparately = typeof options.onPreviewRender === "function";
+  let previewPane: HTMLDivElement | undefined;
+  if (!reportsPreviewSeparately) {
+    previewPane = document.createElement("div");
+    previewPane.className = "mermaid-edit-preview-pane";
+  } else {
+    root.classList.add("mermaid-edit-mode-code-only");
+  }
 
-  root.append(codePane, previewPane);
+  root.append(codePane, ...(previewPane ? [previewPane] : []));
   options.container.appendChild(root);
   // Redundante junto con `autofocus` de arriba (no debería hacer falta si
   // ese mecanismo aplica), pero sin costo si ya está enfocado — cubre
@@ -571,17 +589,26 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
     render(source, theme)
       .then((svg) => {
         if (currentToken !== renderToken) return;
-        previewPane.classList.remove("error");
-        previewPane.innerHTML = svg;
+        if (reportsPreviewSeparately) {
+          options.onPreviewRender!({ ok: true, html: svg, css: getStylesheet() });
+          return;
+        }
+        previewPane!.classList.remove("error");
+        previewPane!.innerHTML = svg;
       })
       .catch((error: unknown) => {
         if (currentToken !== renderToken) return;
-        previewPane.classList.add("error");
-        previewPane.innerHTML = "";
+        const message = error instanceof Error ? error.message : String(error);
+        if (reportsPreviewSeparately) {
+          options.onPreviewRender!({ ok: false, error: message });
+          return;
+        }
+        previewPane!.classList.add("error");
+        previewPane!.innerHTML = "";
         const panel = document.createElement("div");
         panel.className = "mermaid-edit-error-panel";
-        panel.textContent = error instanceof Error ? error.message : String(error);
-        previewPane.appendChild(panel);
+        panel.textContent = message;
+        previewPane!.appendChild(panel);
       });
   }
 
