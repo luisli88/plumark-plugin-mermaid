@@ -82,39 +82,41 @@ body {
   background: rgba(51, 74, 153, 0.25);
 }
 
-/* Paleta de resaltado propia (fija, no derivada de `PluginThemeContext`: ese
-   contrato solo expone 8 slots genéricos de chrome, sin colores de sintaxis
-   — mismo criterio que el resto de este archivo, ej. el rojo fijo de
-   `.mermaid-edit-error-panel`). Clases `hljs-*` estándar, mismo esquema que
+/* Paleta de resaltado — derivada de `PluginThemeContext` en runtime
+   (`syntaxColorsFrom()`, `index.ts`), seteada como custom properties porque ese
+   contrato solo expone 8 slots genéricos de chrome sin colores de sintaxis
+   dedicados por categoría. El valor fijo después de la coma es el fallback
+   sin theme (host sin theming) — los mismos hex que esta hoja tenía antes de
+   volverse theme-aware. Clases `hljs-*` estándar, mismo esquema que
    `highlightSourceToHtml()` produce vía `highlight.js`. */
 .hljs-keyword {
-  color: #334a99;
+  color: var(--mermaid-editor-syntax-keyword, #334a99);
   font-weight: 600;
 }
 
 .hljs-literal {
-  color: #3d6ea8;
+  color: var(--mermaid-editor-syntax-literal, #3d6ea8);
 }
 
 .hljs-comment {
-  color: #8a94a8;
+  color: var(--mermaid-editor-syntax-comment, #8a94a8);
   font-style: italic;
 }
 
 .hljs-string {
-  color: #3f7d4f;
+  color: var(--mermaid-editor-syntax-string, #3f7d4f);
 }
 
 .hljs-operator {
-  color: #8a6e28;
+  color: var(--mermaid-editor-syntax-operator, #8a6e28);
 }
 
 .hljs-title {
-  color: #6a4a94;
+  color: var(--mermaid-editor-syntax-title, #6a4a94);
 }
 
 .hljs-number {
-  color: #b8621b;
+  color: var(--mermaid-editor-syntax-number, #b8621b);
 }
 
 /* Ajuste post-lanzamiento: el diagrama se mostraba pegado a la esquina superior izquierda a su
