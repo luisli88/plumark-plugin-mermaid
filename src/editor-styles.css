@@ -22,6 +22,13 @@ body {
     sans-serif;
 }
 
+/* 008-plugin-edit-mode (fase 2): con `onPreviewRender`, este editor nunca monta su propio panel
+   de vista previa — un contenedor nativo separado (Apple App) lo reemplaza, así que el código
+   pasa a ocupar el ancho completo en vez de compartirlo con una segunda columna vacía. */
+.mermaid-edit-mode-code-only {
+  grid-template-columns: 1fr;
+}
+
 .mermaid-edit-code-pane {
   position: relative;
   background: var(--mermaid-editor-surface-muted);
