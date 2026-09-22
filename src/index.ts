@@ -558,6 +558,29 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
     options.onCommit(textarea.value);
   }
 
+  // Ajuste post-lanzamiento: un mousedown en la vista previa (para interactuar con el diagrama,
+  // no para "terminar de editar") le saca el foco al textarea igual que un click genuinamente
+  // afuera — el navegador blurea el elemento enfocado con cualquier mousedown que no sea sobre él
+  // mismo, sin importar si el nuevo target es o no enfocable (un <div>/<svg> sin tabindex no
+  // toma el foco, así que `event.relatedTarget` queda en `null` en ambos casos, indistinguible).
+  // Se rastrea en cambio si el mousedown que originó el blur empezó DENTRO de `root` — si es así,
+  // el usuario sigue en esta misma sesión de edición, no confirma. Un blur programático pedido
+  // desde afuera (`PluginEditorSandbox.commit()`, botón de cerrar nativo) nunca pasa por un
+  // mousedown acá adentro, así que sigue confirmando como siempre (reportado en pruebas
+  // manuales: clickear el diagrama cerraba el modal, igual que clickear afuera).
+  let blurWasFromInsideRoot = false;
+  root.addEventListener("mousedown", () => {
+    blurWasFromInsideRoot = true;
+  });
+
+  textarea.addEventListener("blur", () => {
+    if (blurWasFromInsideRoot) {
+      blurWasFromInsideRoot = false;
+      return;
+    }
+    commit();
+  });
+
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -575,7 +598,6 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
       scheduleRender();
     }
   });
-  textarea.addEventListener("blur", commit);
 
   return {
     destroy(): void {

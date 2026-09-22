@@ -117,11 +117,24 @@ body {
   color: #b8621b;
 }
 
+/* Ajuste post-lanzamiento: el diagrama se mostraba pegado a la esquina superior izquierda a su
+   tamaño intrínseco en vez de centrado — mismo criterio de centrado que la feature de zoom
+   (host, ZOOM_CONTENT_HOST_CSS), pero sin forzar 100% de ancho/alto: acá el diagrama comparte
+   espacio con el panel de código en vez de tener toda la pantalla para él solo, así que estirar
+   diagramas chicos a lo grande se vería peor que dejarlos en su tamaño natural. */
 .mermaid-edit-preview-pane {
   background: var(--mermaid-editor-surface);
   border-radius: 8px;
   padding: 16px;
   overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mermaid-edit-preview-pane svg {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .mermaid-edit-preview-pane.error {
