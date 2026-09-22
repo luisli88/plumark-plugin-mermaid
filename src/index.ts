@@ -317,6 +317,10 @@ interface PluginEditorMountOptions {
   initialSource: string;
   theme?: PluginThemeContext;
   onCommit: (newSource: string) => void;
+  /** 008-plugin-edit-mode: llamado en cada cambio, no solo al commit final — alimenta el
+   * historial de deshacer/rehacer/restablecer del host (FR-016), con la misma granularidad que el
+   * `input` del textarea del editor genérico. */
+  onChange?: (source: string) => void;
 }
 
 const EDITOR_DEBOUNCE_MS = 300;
@@ -542,7 +546,11 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
 
   renderPreview(options.initialSource);
   updateHighlight(options.initialSource);
-  textarea.addEventListener("input", scheduleRender);
+  function handleInput(): void {
+    options.onChange?.(textarea.value);
+    scheduleRender();
+  }
+  textarea.addEventListener("input", handleInput);
   textarea.addEventListener("scroll", syncHighlightScroll);
 
   function commit(): void {
@@ -563,6 +571,7 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
       textarea.value = `${value.slice(0, selectionStart)}\t${value.slice(selectionEnd)}`;
       textarea.selectionStart = selectionStart + 1;
       textarea.selectionEnd = selectionStart + 1;
+      options.onChange?.(textarea.value);
       scheduleRender();
     }
   });
@@ -571,6 +580,7 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
   return {
     destroy(): void {
       if (debounceTimer) clearTimeout(debounceTimer);
+      textarea.removeEventListener("input", handleInput);
     },
   };
 }
