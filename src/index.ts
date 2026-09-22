@@ -438,6 +438,45 @@ function highlightSourceToHtml(source: string): string {
 }
 
 /**
+ * Paleta de resaltado de sintaxis derivada de los 8 slots genéricos de `PluginThemeContext` — no
+ * hay una correspondencia semántica perfecta por categoría (keyword/string/número/...) sin un
+ * cambio de contrato en plugin-sdk, pero `keyword`/`literal`/`title` sí siguen el acento real del
+ * tema activo, y `comment`/`operator` su `textMuted` — sin theme (host sin theming), cae a la
+ * misma paleta fija de antes (los mismos hex que ya vivían en `editor-styles.css`).
+ */
+function syntaxColorsFrom(theme: PluginThemeContext | undefined): {
+  keyword: string;
+  literal: string;
+  comment: string;
+  string: string;
+  operator: string;
+  title: string;
+  number: string;
+} {
+  if (!theme) {
+    return {
+      keyword: "#334a99",
+      literal: "#3d6ea8",
+      comment: "#8a94a8",
+      string: "#3f7d4f",
+      operator: "#8a6e28",
+      title: "#6a4a94",
+      number: "#b8621b",
+    };
+  }
+  const isDark = theme.mode === "dark";
+  return {
+    keyword: theme.accent,
+    literal: theme.accent,
+    comment: theme.textMuted,
+    operator: theme.textMuted,
+    string: isDark ? "#a5d6a7" : "#3f7d4f",
+    title: isDark ? "#ce93d8" : "#6a4a94",
+    number: isDark ? "#ffb74d" : "#b8621b",
+  };
+}
+
+/**
  * v1 de `mountEditor` — reproduce el layout del editor genérico del host
  * (split apilado, código arriba/preview debajo, mismo debounce/atajos de
  * commit: Escape/Cmd+Enter/blur confirman, Tab inserta un tab real), ahora
@@ -469,6 +508,23 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
   root.style.setProperty("--mermaid-editor-surface-muted", theme?.surfaceMuted ?? "#ecf0f8");
   root.style.setProperty("--mermaid-editor-text", theme?.text ?? "#0f1520");
   root.style.setProperty("--mermaid-editor-border", theme?.border ?? "#334a99");
+  // Ajuste post-lanzamiento (ronda 4): el resaltado de sintaxis quedaba con la MISMA paleta fija
+  // sin importar el tema activo de la app (reportado en pruebas manuales — mac e iPad con temas
+  // distintos mostraban exactamente los mismos colores). `PluginThemeContext` no expone tokens
+  // dedicados por categoría (keyword/string/número/...) — el host los tiene (`ThemeColors.syntax*`)
+  // pero ese detalle es interno al chrome del host, no parte del contrato del plugin — así que la
+  // paleta se deriva de los 8 slots genéricos que sí llegan, en vez de quedar 100% fija. No es una
+  // correspondencia semántica perfecta categoría por categoría (ese nivel de detalle necesitaría
+  // un cambio de contrato en plugin-sdk), pero ya reacciona al modo claro/oscuro y al acento del
+  // tema activo, en vez de ignorarlo por completo.
+  const syntaxColors = syntaxColorsFrom(theme);
+  root.style.setProperty("--mermaid-editor-syntax-keyword", syntaxColors.keyword);
+  root.style.setProperty("--mermaid-editor-syntax-literal", syntaxColors.literal);
+  root.style.setProperty("--mermaid-editor-syntax-comment", syntaxColors.comment);
+  root.style.setProperty("--mermaid-editor-syntax-string", syntaxColors.string);
+  root.style.setProperty("--mermaid-editor-syntax-operator", syntaxColors.operator);
+  root.style.setProperty("--mermaid-editor-syntax-title", syntaxColors.title);
+  root.style.setProperty("--mermaid-editor-syntax-number", syntaxColors.number);
 
   const codePane = document.createElement("div");
   codePane.className = "mermaid-edit-code-pane";
