@@ -1,24 +1,18 @@
-import hljs from "highlight.js/lib/core";
 import mermaid from "mermaid";
 // `--loader:.css=text` (ver package.json `build`) da el contenido crudo del
 // CSS como string — mismo mecanismo que usa `markdown-editor-plugin-katex`
 // para su propio `katex/dist/katex.min.css`.
 import svgStyles from "./styles.css";
-import editorStyles from "./editor-styles.css";
 
 // Plugin de primera parte (research.md R4/R9) — mismo contrato exacto que
 // cualquier plugin de terceros (contracts/plugin-contract.md), sin camino de
 // código especial. Se empaqueta (bundlea) con la librería `mermaid` incluida
 // para que el sandbox nunca necesite red al ejecutarlo (FR-024).
-
-/** Señal interna del host (`sandbox-editor-bootstrap.ts`, plugin-runtime) — no forma parte del
- * contrato público de `PluginEditorMountOptions`, ver el comentario junto a donde se lee más
- * abajo (`reportsPreviewSeparately`). */
-declare global {
-  interface Window {
-    __pluginEditCommitRequested?: boolean;
-  }
-}
+//
+// 009-codemirror-plugin-editor: este plugin ya no monta su propio editor
+// (`mountEditor()` eliminado) — solo aporta su gramática de resaltado
+// (`getSyntaxGrammar()`) al editor de código compartido del host, mismo
+// criterio que cualquier otro plugin sin editor propio.
 
 /**
  * Mismo shape que `PluginThemeContext` de `@plumark/plugin-sdk` — no
@@ -37,6 +31,17 @@ interface PluginThemeContext {
   accent: string;
 }
 
+/** Mismo shape que `TokenTag` de `@plumark/plugin-sdk` (009-codemirror-plugin-editor). */
+type TokenTag = "keyword" | "string" | "comment" | "number" | "operator" | "title";
+
+/** Mismo shape que `TokenRule` de `@plumark/plugin-sdk` — ver nota de `PluginThemeContext` arriba sobre por qué no se importa el paquete. */
+interface TokenRule {
+  regex: string;
+  tag: TokenTag;
+  group?: string;
+  closesGroup?: string;
+}
+
 /** Mismo shape que `SyntaxGrammar` de `@plumark/plugin-sdk` — ver nota de `PluginThemeContext` arriba sobre por qué no se importa el paquete. */
 interface SyntaxGrammar {
   caseInsensitive?: boolean;
@@ -44,6 +49,12 @@ interface SyntaxGrammar {
   comment?: { begin: string; end: string };
   quoteStrings?: boolean;
   contains?: Array<{ className: string; begin: string; end?: string }>;
+  /** 009-codemirror-plugin-editor: alimenta el editor de código compartido del host
+   * (CodeMirror). Los campos de arriba (`keywords`/`comment`/`quoteStrings`/`contains`)
+   * siguen alimentando el resaltado `hljs` de los code fences regulares del documento
+   * (`decorations.ts`, fuera de alcance) — ambos describen la MISMA gramática, cada uno
+   * en el formato que su consumidor espera. */
+  rules?: TokenRule[];
 }
 
 // Paleta de marca ("Ideas El Gato Sin Botas" v1.0.0 — design/design-reference.md)
@@ -315,33 +326,6 @@ async function render(source: string, theme?: PluginThemeContext): Promise<strin
   return svg;
 }
 
-/** Mismo shape que `PluginEditorSession` de `@plumark/plugin-sdk` — ver nota de `PluginThemeContext` arriba sobre por qué no se importa el paquete. */
-interface PluginEditorSession {
-  destroy(): void;
-}
-
-/** Mismo shape que `PluginPreviewRenderResult` de `@plumark/plugin-sdk`. */
-type PluginPreviewRenderResult = { ok: true; html: string; css?: string } | { ok: false; error: string };
-
-/** Mismo shape que `PluginEditorMountOptions` de `@plumark/plugin-sdk`. */
-interface PluginEditorMountOptions {
-  container: HTMLElement;
-  initialSource: string;
-  theme?: PluginThemeContext;
-  onCommit: (newSource: string) => void;
-  /** 008-plugin-edit-mode: llamado en cada cambio, no solo al commit final — alimenta el
-   * historial de deshacer/rehacer/restablecer del host (FR-016), con la misma granularidad que el
-   * `input` del textarea del editor genérico. */
-  onChange?: (source: string) => void;
-  /** 008-plugin-edit-mode (fase 2): si está presente, este `mountEditor` NO monta su propio panel
-   * de vista previa — reporta cada render acá en su lugar, para que un contenedor nativo separado
-   * (Apple App) lo muestre con su propio pan/zoom. Sin esto (Desktop App), sigue con el panel de
-   * preview propio, como siempre. */
-  onPreviewRender?: (result: PluginPreviewRenderResult) => void;
-}
-
-const EDITOR_DEBOUNCE_MS = 300;
-
 /**
  * Gramática de resaltado propia (antes vivía a mano dentro del monorepo host,
  * en `document-core/src/syntax/mermaid.ts` — movida acá para que agregar un
@@ -355,363 +339,84 @@ const EDITOR_DEBOUNCE_MS = 300;
  * completo (eso solo lo tiene el propio Mermaid), pero sí una cobertura real
  * de lo que aparece en la práctica.
  */
+const DIAGRAM_KEYWORDS =
+  // Declaración de tipo de diagrama.
+  "graph flowchart flowchart-elk sequenceDiagram classDiagram classDiagram-v2 " +
+  "stateDiagram stateDiagram-v2 erDiagram gantt pie journey gitGraph mindmap " +
+  "quadrantChart timeline requirementDiagram sankey-beta xychart-beta " +
+  "block-beta packet-beta C4Context C4Container C4Component C4Dynamic C4Deployment " +
+  // Flowchart.
+  "subgraph end direction " +
+  // Sequence diagram.
+  "participant actor activate deactivate note over left right of loop alt " +
+  "else opt par and critical option break rect autonumber box create destroy " +
+  "links properties details " +
+  // Class diagram / state diagram.
+  "class interface namespace state as hide empty description " +
+  // ER diagram.
+  "one-or-zero one-or-many zero-or-more zero-or-one only " +
+  // Gantt.
+  "dateFormat axisFormat includes excludes todayMarker tickInterval weekday " +
+  "section done active crit milestone after before " +
+  // Pie / journey / timeline / quadrant.
+  "showData x-axis y-axis quadrant-1 quadrant-2 quadrant-3 quadrant-4 " +
+  // GitGraph.
+  "commit branch checkout merge cherry-pick tag reset order type id parent " +
+  // Directivas comunes a varios diagramas.
+  "title click link style classDef linkStyle callback cssClass";
+const DIAGRAM_LITERALS = "TD TB LR RL BT true false";
+
+// Conectores/flechas de flowchart y mensajes de sequenceDiagram — el mismo campo semántico que
+// un operador en un lenguaje de programación — más las relaciones de classDiagram
+// (herencia/composición/agregación/realización).
+const OPERATOR_PATTERN =
+  "(<?-{1,2}\\.{1,2}->>?|<?={2,3}>|-{1,2}>>|--?>>|<-{1,2}>|--[ox]|\\.\\.>|-{2,3}>|-{2,3}(?!>)|-x|--x|-\\)|--\\)|" +
+  "<\\|--|--\\|>|\\*--|--\\*|o--|--o|\\.\\.\\|>|<\\|\\.\\.|\\.\\.>|<\\.\\.)";
+// Etiqueta de nodo/arista entre corchetes/paréntesis/llaves — ej. `A[Inicio]`, `B(Proceso)`, `C{Decisión}`.
+const NODE_LABEL_PATTERN = "[[({][^\\]})]*[\\])}]";
+// Etiqueta de arista sin comillas — ej. `A -->|etiqueta| B`.
+const EDGE_LABEL_PATTERN = "\\|[^|\\n]*\\|";
+// Números y duraciones (gantt: `5d`, `2w`; fechas: `2024-01-01`; porcentajes de pie).
+const NUMBER_PATTERN = "\\b\\d{4}-\\d{2}-\\d{2}\\b|\\b\\d+(\\.\\d+)?[dwmy]?%?\\b";
+
+function wordAlternation(words: string): string {
+  return `\\b(?:${words.trim().split(/\s+/).join("|")})\\b`;
+}
+
 const syntaxGrammar: SyntaxGrammar = {
   keywords: {
-    keyword:
-      // Declaración de tipo de diagrama.
-      "graph flowchart flowchart-elk sequenceDiagram classDiagram classDiagram-v2 " +
-      "stateDiagram stateDiagram-v2 erDiagram gantt pie journey gitGraph mindmap " +
-      "quadrantChart timeline requirementDiagram sankey-beta xychart-beta " +
-      "block-beta packet-beta C4Context C4Container C4Component C4Dynamic C4Deployment " +
-      // Flowchart.
-      "subgraph end direction " +
-      // Sequence diagram.
-      "participant actor activate deactivate note over left right of loop alt " +
-      "else opt par and critical option break rect autonumber box create destroy " +
-      "links properties details " +
-      // Class diagram / state diagram.
-      "class interface namespace state as hide empty description " +
-      // ER diagram.
-      "one-or-zero one-or-many zero-or-more zero-or-one only " +
-      // Gantt.
-      "dateFormat axisFormat includes excludes todayMarker tickInterval weekday " +
-      "section done active crit milestone after before " +
-      // Pie / journey / timeline / quadrant.
-      "showData x-axis y-axis quadrant-1 quadrant-2 quadrant-3 quadrant-4 " +
-      // GitGraph.
-      "commit branch checkout merge cherry-pick tag reset order type id parent " +
-      // Directivas comunes a varios diagramas.
-      "title click link style classDef linkStyle callback cssClass",
-    literal: "TD TB LR RL BT true false",
+    keyword: DIAGRAM_KEYWORDS,
+    literal: DIAGRAM_LITERALS,
   },
   comment: { begin: "%%", end: "$" },
   quoteStrings: true,
   contains: [
-    {
-      // Conectores/flechas de flowchart y mensajes de sequenceDiagram — el
-      // mismo campo semántico que un operador en un lenguaje de programación.
-      className: "operator",
-      begin:
-        "(<?-{1,2}\\.{1,2}->>?|<?={2,3}>|-{1,2}>>|--?>>|<-{1,2}>|--[ox]|\\.\\.>|-{2,3}>|-{2,3}(?!>)|-x|--x|-\\)|--\\)|" +
-        // Relaciones de classDiagram: herencia/composición/agregación/realización.
-        "<\\|--|--\\|>|\\*--|--\\*|o--|--o|\\.\\.\\|>|<\\|\\.\\.|\\.\\.>|<\\.\\.)",
-    },
-    {
-      // Etiqueta de nodo/arista entre corchetes/paréntesis/llaves — ej.
-      // `A[Inicio]`, `B(Proceso)`, `C{Decisión}`.
-      className: "title",
-      begin: "[[({][^\\]})]*[\\])}]",
-    },
-    {
-      // Etiqueta de arista sin comillas — ej. `A -->|etiqueta| B`.
-      className: "string",
-      begin: "\\|[^|\\n]*\\|",
-    },
-    {
-      // Números y duraciones (gantt: `5d`, `2w`; fechas: `2024-01-01`;
-      // porcentajes de pie).
-      className: "number",
-      begin: "\\b\\d{4}-\\d{2}-\\d{2}\\b|\\b\\d+(\\.\\d+)?[dwmy]?%?\\b",
-    },
+    { className: "operator", begin: OPERATOR_PATTERN },
+    { className: "title", begin: NODE_LABEL_PATTERN },
+    { className: "string", begin: EDGE_LABEL_PATTERN },
+    { className: "number", begin: NUMBER_PATTERN },
+  ],
+  // 009-codemirror-plugin-editor: misma gramática que arriba (`keywords`/`comment`/
+  // `quoteStrings`/`contains`, que siguen alimentando el resaltado `hljs` de los code fences
+  // regulares del documento, fuera de alcance), expresada como `TokenRule[]` para el editor de
+  // código compartido del host. `%%[^\\n]*` (comentario) es una sola regla autocontenida en vez de
+  // un par `group`/`closesGroup` — Mermaid no tiene comentarios multilínea, y `StringStream` nunca
+  // ve el propio carácter de salto de línea, así que un delimitador de cierre como `$`/`\n` nunca
+  // haría match (research.md R4).
+  rules: [
+    { regex: wordAlternation(DIAGRAM_KEYWORDS), tag: "keyword" },
+    { regex: wordAlternation(DIAGRAM_LITERALS), tag: "keyword" },
+    { regex: "%%[^\\n]*", tag: "comment" },
+    { regex: '"(?:[^"\\\\]|\\\\.)*"', tag: "string" },
+    { regex: OPERATOR_PATTERN, tag: "operator" },
+    { regex: NODE_LABEL_PATTERN, tag: "title" },
+    { regex: EDGE_LABEL_PATTERN, tag: "string" },
+    { regex: NUMBER_PATTERN, tag: "number" },
   ],
 };
 
 function getSyntaxGrammar(): SyntaxGrammar {
   return syntaxGrammar;
-}
-
-/**
- * Traduce `syntaxGrammar` (datos serializables, `getSyntaxGrammar()`) a la
- * función `(hljs) => Language` real que `highlight.js` necesita — mismo
- * mecanismo que usa el host para cualquier plugin (`translateGrammar`,
- * `document-core/src/syntax-highlighting.ts`), reimplementado acá porque el
- * overlay de resaltado de `mountEditor()` (más abajo) corre DENTRO de este
- * sandbox, nunca en el host, así que no puede reusar esa función.
- */
-hljs.registerLanguage("mermaid", (hljsInstance) => ({
-  case_insensitive: syntaxGrammar.caseInsensitive ?? false,
-  ...(syntaxGrammar.keywords ? { keywords: syntaxGrammar.keywords } : {}),
-  contains: [
-    ...(syntaxGrammar.comment
-      ? [hljsInstance.COMMENT(syntaxGrammar.comment.begin, syntaxGrammar.comment.end)]
-      : []),
-    ...(syntaxGrammar.quoteStrings ? [hljsInstance.QUOTE_STRING_MODE] : []),
-    ...(syntaxGrammar.contains ?? []).map((rule) => ({
-      className: rule.className,
-      begin: new RegExp(rule.begin),
-      ...(rule.end ? { end: new RegExp(rule.end) } : {}),
-    })),
-  ],
-}));
-
-const HTML_ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>]/g, (ch) => HTML_ESCAPE[ch] ?? ch);
-}
-
-/** Overlay de resaltado del editor propio — mismo `hljs.highlight()` que usa el host, misma técnica de `<pre><code>` detrás de un `<textarea>` con texto transparente (`diagram-edit-mode.ts`, host, para el editor genérico). */
-function highlightSourceToHtml(source: string): string {
-  return `${hljs.highlight(source, { language: "mermaid" }).value}\n`;
-}
-
-/**
- * Paleta de resaltado de sintaxis derivada de los 8 slots genéricos de `PluginThemeContext` — no
- * hay una correspondencia semántica perfecta por categoría (keyword/string/número/...) sin un
- * cambio de contrato en plugin-sdk, pero `keyword`/`literal`/`title` sí siguen el acento real del
- * tema activo, y `comment`/`operator` su `textMuted` — sin theme (host sin theming), cae a la
- * misma paleta fija de antes (los mismos hex que ya vivían en `editor-styles.css`).
- */
-function syntaxColorsFrom(theme: PluginThemeContext | undefined): {
-  keyword: string;
-  literal: string;
-  comment: string;
-  string: string;
-  operator: string;
-  title: string;
-  number: string;
-} {
-  if (!theme) {
-    return {
-      keyword: "#334a99",
-      literal: "#3d6ea8",
-      comment: "#8a94a8",
-      string: "#3f7d4f",
-      operator: "#8a6e28",
-      title: "#6a4a94",
-      number: "#b8621b",
-    };
-  }
-  const isDark = theme.mode === "dark";
-  return {
-    keyword: theme.accent,
-    literal: theme.accent,
-    comment: theme.textMuted,
-    operator: theme.textMuted,
-    string: isDark ? "#a5d6a7" : "#3f7d4f",
-    title: isDark ? "#ce93d8" : "#6a4a94",
-    number: isDark ? "#ffb74d" : "#b8621b",
-  };
-}
-
-/**
- * v1 de `mountEditor` — reproduce el layout del editor genérico del host
- * (split apilado, código arriba/preview debajo, mismo debounce/atajos de
- * commit: Escape/Cmd+Enter/blur confirman, Tab inserta un tab real), ahora
- * dueño de su propio DOM/CSS dentro de este sandbox en vez del `editor.css`
- * del host.
- *
- * Con overlay de resaltado propio (`highlightSourceToHtml`, arriba) — mismo
- * `<pre><code>` detrás de un `<textarea>` de texto transparente que usa el
- * editor genérico del host (`diagram-edit-mode.ts`), pero con la propia
- * gramática/paleta del plugin en vez de depender de tokens que
- * `PluginThemeContext` no expone (son detalle del chrome del host, no del
- * tema).
- */
-function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
-  const theme = options.theme;
-
-  const style = document.createElement("style");
-  style.textContent = editorStyles;
-  document.head.appendChild(style);
-
-  const root = document.createElement("div");
-  root.className = "mermaid-edit-mode";
-  // `editor-styles.css` referencia estas custom properties en vez de
-  // colores fijos — es la única parte de la hoja que depende de `theme`
-  // (recibido en runtime, no algo que un archivo `.css` estático pueda
-  // tener adentro), así que viaja aparte, seteada acá en vez de
-  // interpolada dentro del CSS.
-  root.style.setProperty("--mermaid-editor-surface", theme?.surface ?? "#f0f2fa");
-  root.style.setProperty("--mermaid-editor-surface-muted", theme?.surfaceMuted ?? "#ecf0f8");
-  root.style.setProperty("--mermaid-editor-text", theme?.text ?? "#0f1520");
-  root.style.setProperty("--mermaid-editor-border", theme?.border ?? "#334a99");
-  // Ajuste post-lanzamiento (ronda 4): el resaltado de sintaxis quedaba con la MISMA paleta fija
-  // sin importar el tema activo de la app (reportado en pruebas manuales — mac e iPad con temas
-  // distintos mostraban exactamente los mismos colores). `PluginThemeContext` no expone tokens
-  // dedicados por categoría (keyword/string/número/...) — el host los tiene (`ThemeColors.syntax*`)
-  // pero ese detalle es interno al chrome del host, no parte del contrato del plugin — así que la
-  // paleta se deriva de los 8 slots genéricos que sí llegan, en vez de quedar 100% fija. No es una
-  // correspondencia semántica perfecta categoría por categoría (ese nivel de detalle necesitaría
-  // un cambio de contrato en plugin-sdk), pero ya reacciona al modo claro/oscuro y al acento del
-  // tema activo, en vez de ignorarlo por completo.
-  const syntaxColors = syntaxColorsFrom(theme);
-  root.style.setProperty("--mermaid-editor-syntax-keyword", syntaxColors.keyword);
-  root.style.setProperty("--mermaid-editor-syntax-literal", syntaxColors.literal);
-  root.style.setProperty("--mermaid-editor-syntax-comment", syntaxColors.comment);
-  root.style.setProperty("--mermaid-editor-syntax-string", syntaxColors.string);
-  root.style.setProperty("--mermaid-editor-syntax-operator", syntaxColors.operator);
-  root.style.setProperty("--mermaid-editor-syntax-title", syntaxColors.title);
-  root.style.setProperty("--mermaid-editor-syntax-number", syntaxColors.number);
-
-  const codePane = document.createElement("div");
-  codePane.className = "mermaid-edit-code-pane";
-
-  const highlightPre = document.createElement("pre");
-  highlightPre.className = "mermaid-edit-highlight";
-  highlightPre.setAttribute("aria-hidden", "true");
-  const highlightCode = document.createElement("code");
-  highlightPre.appendChild(highlightCode);
-
-  const textarea = document.createElement("textarea");
-  textarea.className = "mermaid-edit-textarea";
-  textarea.value = options.initialSource;
-  textarea.spellcheck = false;
-  // `autofocus` (atributo declarativo) en vez de solo `textarea.focus()`
-  // imperativo: este `mountEditor()` corre recién después de un round-trip
-  // async (mensaje "mount" del host + `import()` de este módulo desde un
-  // blob), fuera de cualquier gesto de usuario síncrono — verificado que
-  // WebKit, dentro de un iframe sandboxeado, bloquea en silencio un
-  // `element.focus()` disparado ahí (activeElement se quedaba en `<body>`
-  // pese a que el iframe SÍ tenía foco de ventana). `autofocus` es un
-  // mecanismo distinto: lo procesa el propio navegador al insertar el nodo,
-  // no gateado detrás de "hay un gesto de usuario corriendo ahora" — solo
-  // requiere el permiso de Permissions Policy (`allow="autofocus"` en el
-  // `<iframe>`, ver `plugin-editor-sandbox.ts`).
-  textarea.autofocus = true;
-  codePane.append(highlightPre, textarea);
-
-  // 008-plugin-edit-mode (fase 2): con `onPreviewRender`, este editor nunca dibuja su propio panel
-  // de vista previa — un contenedor nativo separado (Apple App) lo reemplaza por completo,
-  // reportando cada render en su lugar (ver `renderPreview` más abajo). Sin esto (Desktop App),
-  // sigue exactamente igual que antes.
-  const reportsPreviewSeparately = typeof options.onPreviewRender === "function";
-  let previewPane: HTMLDivElement | undefined;
-  if (!reportsPreviewSeparately) {
-    previewPane = document.createElement("div");
-    previewPane.className = "mermaid-edit-preview-pane";
-  } else {
-    root.classList.add("mermaid-edit-mode-code-only");
-  }
-
-  root.append(codePane, ...(previewPane ? [previewPane] : []));
-  options.container.appendChild(root);
-  // Redundante junto con `autofocus` de arriba (no debería hacer falta si
-  // ese mecanismo aplica), pero sin costo si ya está enfocado — cubre
-  // cualquier caso donde `autofocus` no re-dispare por algún motivo.
-  textarea.focus();
-
-  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-  let renderToken = 0;
-
-  function renderPreview(source: string): void {
-    const currentToken = ++renderToken;
-    render(source, theme)
-      .then((svg) => {
-        if (currentToken !== renderToken) return;
-        if (reportsPreviewSeparately) {
-          options.onPreviewRender!({ ok: true, html: svg, css: getStylesheet() });
-          return;
-        }
-        previewPane!.classList.remove("error");
-        previewPane!.innerHTML = svg;
-      })
-      .catch((error: unknown) => {
-        if (currentToken !== renderToken) return;
-        const message = error instanceof Error ? error.message : String(error);
-        if (reportsPreviewSeparately) {
-          options.onPreviewRender!({ ok: false, error: message });
-          return;
-        }
-        previewPane!.classList.add("error");
-        previewPane!.innerHTML = "";
-        const panel = document.createElement("div");
-        panel.className = "mermaid-edit-error-panel";
-        panel.textContent = message;
-        previewPane!.appendChild(panel);
-      });
-  }
-
-  function updateHighlight(source: string): void {
-    highlightCode.innerHTML = highlightSourceToHtml(source);
-  }
-
-  function syncHighlightScroll(): void {
-    highlightPre.scrollTop = textarea.scrollTop;
-    highlightPre.scrollLeft = textarea.scrollLeft;
-  }
-
-  function scheduleRender(): void {
-    updateHighlight(textarea.value);
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => renderPreview(textarea.value), EDITOR_DEBOUNCE_MS);
-  }
-
-  renderPreview(options.initialSource);
-  updateHighlight(options.initialSource);
-  function handleInput(): void {
-    options.onChange?.(textarea.value);
-    scheduleRender();
-  }
-  textarea.addEventListener("input", handleInput);
-  textarea.addEventListener("scroll", syncHighlightScroll);
-
-  function commit(): void {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    options.onCommit(textarea.value);
-  }
-
-  if (reportsPreviewSeparately) {
-    // Ajuste post-lanzamiento (ronda 4): con preview nativo, ya no hay panel de preview propio
-    // adentro de `root` que distinguir — el diagrama vive en un WKWebView hermano, fuera de este
-    // iframe por completo. Perder el foco ya no significa "el usuario terminó de editar": puede
-    // pasar por clickear ese panel nativo, o por cambiar de app en macOS (reportado en pruebas
-    // manuales: "al hacer clic en el diagrama se cierra el modal", "al cambiar de app se cierra
-    // el modal"). El único blur que sí debe confirmar es el que `PluginEditorSandbox.commit()`
-    // dispara a pedido explícito (botón de cerrar nativo/Escape/Cmd+Enter) — señalizado por
-    // `window.__pluginEditCommitRequested` (`sandbox-editor-bootstrap.ts`), `true` solo durante
-    // esa llamada síncrona a `blur()`.
-    textarea.addEventListener("blur", () => {
-      if (window.__pluginEditCommitRequested) commit();
-    });
-  } else {
-    // Ajuste post-lanzamiento: un mousedown en la vista previa (para interactuar con el diagrama,
-    // no para "terminar de editar") le saca el foco al textarea igual que un click genuinamente
-    // afuera — el navegador blurea el elemento enfocado con cualquier mousedown que no sea sobre
-    // él mismo, sin importar si el nuevo target es o no enfocable (un <div>/<svg> sin tabindex no
-    // toma el foco, así que `event.relatedTarget` queda en `null` en ambos casos, indistinguible).
-    // Se rastrea en cambio si el mousedown que originó el blur empezó DENTRO de `root` — si es
-    // así, el usuario sigue en esta misma sesión de edición, no confirma. Un blur programático
-    // pedido desde afuera (`PluginEditorSandbox.commit()`, botón de cerrar nativo) nunca pasa por
-    // un mousedown acá adentro, así que sigue confirmando como siempre (reportado en pruebas
-    // manuales: clickear el diagrama cerraba el modal, igual que clickear afuera).
-    let blurWasFromInsideRoot = false;
-    root.addEventListener("mousedown", () => {
-      blurWasFromInsideRoot = true;
-    });
-
-    textarea.addEventListener("blur", () => {
-      if (blurWasFromInsideRoot) {
-        blurWasFromInsideRoot = false;
-        return;
-      }
-      commit();
-    });
-  }
-
-  textarea.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      commit();
-    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      commit();
-    } else if (event.key === "Tab") {
-      event.preventDefault();
-      const { selectionStart, selectionEnd, value } = textarea;
-      textarea.value = `${value.slice(0, selectionStart)}\t${value.slice(selectionEnd)}`;
-      textarea.selectionStart = selectionStart + 1;
-      textarea.selectionEnd = selectionStart + 1;
-      options.onChange?.(textarea.value);
-      scheduleRender();
-    }
-  });
-
-  return {
-    destroy(): void {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      textarea.removeEventListener("input", handleInput);
-    },
-  };
 }
 
 /**
@@ -750,6 +455,5 @@ export default {
   getExportRepresentations,
   getSyntaxGrammar,
   getInsertMenuItem,
-  mountEditor,
   getStylesheet,
 };
