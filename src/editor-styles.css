@@ -16,6 +16,14 @@ body {
   height: 100%;
   box-sizing: border-box;
   padding: 4px;
+  /* Ajuste post-lanzamiento (ronda 8): sin esto, el editor genérico del host
+     (`.diagram-edit-mode`, `editor.css`) ya tenía este `overflow: hidden` en su equivalente —
+     acá faltaba. Sin él, si el panel de código o el textarea calculan aunque sea un poco más
+     alto que el layout de 100% (redondeo, `min-height` heredado), ese exceso escapaba de este
+     grid y terminaba scrolleando el DOCUMENTO del iframe entero (`html`/`body`), un segundo
+     scroll aparte del propio del `<textarea>` (reportado en pruebas manuales: "doble scroll, el
+     del contenedor y el del editor de texto"). */
+  overflow: hidden;
   font-family:
     -apple-system,
     "Segoe UI",
@@ -37,6 +45,13 @@ body {
 
 .mermaid-edit-code-pane {
   position: relative;
+  /* `height`/`overflow` explícitos (ronda 8) — antes dependía solo del stretch implícito de CSS
+     Grid, que no siempre gana contra el `min-height: 160px` del textarea de abajo. Con esto, el
+     panel nunca es más alto que su celda del grid, y nada de lo que haya adentro puede escapar de
+     su propia caja. */
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   background: var(--mermaid-editor-surface-muted);
   border: 2px solid var(--mermaid-editor-border);
   border-radius: 8px;
@@ -106,11 +121,14 @@ body {
   background: rgba(51, 74, 153, 0.25);
 }
 
-/* Ajuste post-lanzamiento (ronda 6): `resize: vertical` (arriba) deja arrastrar el textarea más
-   alto que su propio panel, dejando ver lo que sea que haya detrás — sin sentido en el modal
-   nativo, donde el layout es fijo a pantalla completa. */
+/* Ajuste post-lanzamiento (ronda 6/8): `resize: vertical` deja arrastrar el textarea más alto que
+   su propio panel, dejando ver lo que sea que haya detrás — sin sentido en el modal nativo, donde
+   el layout es fijo a pantalla completa. `min-height: 0` (ronda 8) — el `min-height: 160px` de
+   arriba podía forzar al textarea a ser más alto que su panel (ahora con `overflow: hidden`) en
+   una ventana genuinamente corta, cortando parte del propio textarea en vez de solo achicarlo. */
 .mermaid-edit-mode-code-only .mermaid-edit-textarea {
   resize: none;
+  min-height: 0;
 }
 
 /* Paleta de resaltado — derivada de `PluginThemeContext` en runtime
