@@ -36,7 +36,15 @@ body {
 
    `gap`/`padding` en 0 (ronda 6): pensados para separar dos columnas — con una sola, solo dejaban
    un margen visible entre el código y el borde del iframe, en vez de ocupar TODO el espacio como
-   el editor principal del documento (pedido explícito). */
+   el editor principal del documento (pedido explícito).
+
+   Ronda 9: se probó `display: block` acá (sugerencia razonable — un solo hijo no necesita grid en
+   absoluto) y coincidió con una regresión en pruebas automatizadas del lado del host (el botón de
+   cerrar dejaba de funcionar). Descartado como causa — la regresión real era del lado nativo
+   (Apple App, `PluginEditView.swift`): quitar `.background(theme.surfaceMutedColor)` del
+   `WKWebView` del panel de código, sin relación con esta hoja de estilos, hacía que SwiftUI
+   recreara el `WKWebView` en vez de actualizarlo. Queda en grid con una sola columna igual —
+   `display: block` es válido acá, simplemente nunca se retomó tras descartarse como sospechoso. */
 .mermaid-edit-mode-code-only {
   grid-template-columns: 1fr;
   gap: 0;
