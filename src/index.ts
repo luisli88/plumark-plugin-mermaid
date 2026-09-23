@@ -11,6 +11,15 @@ import editorStyles from "./editor-styles.css";
 // código especial. Se empaqueta (bundlea) con la librería `mermaid` incluida
 // para que el sandbox nunca necesite red al ejecutarlo (FR-024).
 
+/** Señal interna del host (`sandbox-editor-bootstrap.ts`, plugin-runtime) — no forma parte del
+ * contrato público de `PluginEditorMountOptions`, ver el comentario junto a donde se lee más
+ * abajo (`reportsPreviewSeparately`). */
+declare global {
+  interface Window {
+    __pluginEditCommitRequested?: boolean;
+  }
+}
+
 /**
  * Mismo shape que `PluginThemeContext` de `@plumark/plugin-sdk` — no
  * se declara como dependencia de npm (ese paquete es privado al monorepo,
@@ -641,28 +650,43 @@ function mountEditor(options: PluginEditorMountOptions): PluginEditorSession {
     options.onCommit(textarea.value);
   }
 
-  // Ajuste post-lanzamiento: un mousedown en la vista previa (para interactuar con el diagrama,
-  // no para "terminar de editar") le saca el foco al textarea igual que un click genuinamente
-  // afuera — el navegador blurea el elemento enfocado con cualquier mousedown que no sea sobre él
-  // mismo, sin importar si el nuevo target es o no enfocable (un <div>/<svg> sin tabindex no
-  // toma el foco, así que `event.relatedTarget` queda en `null` en ambos casos, indistinguible).
-  // Se rastrea en cambio si el mousedown que originó el blur empezó DENTRO de `root` — si es así,
-  // el usuario sigue en esta misma sesión de edición, no confirma. Un blur programático pedido
-  // desde afuera (`PluginEditorSandbox.commit()`, botón de cerrar nativo) nunca pasa por un
-  // mousedown acá adentro, así que sigue confirmando como siempre (reportado en pruebas
-  // manuales: clickear el diagrama cerraba el modal, igual que clickear afuera).
-  let blurWasFromInsideRoot = false;
-  root.addEventListener("mousedown", () => {
-    blurWasFromInsideRoot = true;
-  });
+  if (reportsPreviewSeparately) {
+    // Ajuste post-lanzamiento (ronda 4): con preview nativo, ya no hay panel de preview propio
+    // adentro de `root` que distinguir — el diagrama vive en un WKWebView hermano, fuera de este
+    // iframe por completo. Perder el foco ya no significa "el usuario terminó de editar": puede
+    // pasar por clickear ese panel nativo, o por cambiar de app en macOS (reportado en pruebas
+    // manuales: "al hacer clic en el diagrama se cierra el modal", "al cambiar de app se cierra
+    // el modal"). El único blur que sí debe confirmar es el que `PluginEditorSandbox.commit()`
+    // dispara a pedido explícito (botón de cerrar nativo/Escape/Cmd+Enter) — señalizado por
+    // `window.__pluginEditCommitRequested` (`sandbox-editor-bootstrap.ts`), `true` solo durante
+    // esa llamada síncrona a `blur()`.
+    textarea.addEventListener("blur", () => {
+      if (window.__pluginEditCommitRequested) commit();
+    });
+  } else {
+    // Ajuste post-lanzamiento: un mousedown en la vista previa (para interactuar con el diagrama,
+    // no para "terminar de editar") le saca el foco al textarea igual que un click genuinamente
+    // afuera — el navegador blurea el elemento enfocado con cualquier mousedown que no sea sobre
+    // él mismo, sin importar si el nuevo target es o no enfocable (un <div>/<svg> sin tabindex no
+    // toma el foco, así que `event.relatedTarget` queda en `null` en ambos casos, indistinguible).
+    // Se rastrea en cambio si el mousedown que originó el blur empezó DENTRO de `root` — si es
+    // así, el usuario sigue en esta misma sesión de edición, no confirma. Un blur programático
+    // pedido desde afuera (`PluginEditorSandbox.commit()`, botón de cerrar nativo) nunca pasa por
+    // un mousedown acá adentro, así que sigue confirmando como siempre (reportado en pruebas
+    // manuales: clickear el diagrama cerraba el modal, igual que clickear afuera).
+    let blurWasFromInsideRoot = false;
+    root.addEventListener("mousedown", () => {
+      blurWasFromInsideRoot = true;
+    });
 
-  textarea.addEventListener("blur", () => {
-    if (blurWasFromInsideRoot) {
-      blurWasFromInsideRoot = false;
-      return;
-    }
-    commit();
-  });
+    textarea.addEventListener("blur", () => {
+      if (blurWasFromInsideRoot) {
+        blurWasFromInsideRoot = false;
+        return;
+      }
+      commit();
+    });
+  }
 
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
