@@ -187317,17 +187317,23 @@ function mountEditor(options2) {
     if (debounceTimer) clearTimeout(debounceTimer);
     options2.onCommit(textarea.value);
   }
-  let blurWasFromInsideRoot = false;
-  root4.addEventListener("mousedown", () => {
-    blurWasFromInsideRoot = true;
-  });
-  textarea.addEventListener("blur", () => {
-    if (blurWasFromInsideRoot) {
-      blurWasFromInsideRoot = false;
-      return;
-    }
-    commit2();
-  });
+  if (reportsPreviewSeparately) {
+    textarea.addEventListener("blur", () => {
+      if (window.__pluginEditCommitRequested) commit2();
+    });
+  } else {
+    let blurWasFromInsideRoot = false;
+    root4.addEventListener("mousedown", () => {
+      blurWasFromInsideRoot = true;
+    });
+    textarea.addEventListener("blur", () => {
+      if (blurWasFromInsideRoot) {
+        blurWasFromInsideRoot = false;
+        return;
+      }
+      commit2();
+    });
+  }
   textarea.addEventListener("keydown", (event3) => {
     if (event3.key === "Escape") {
       event3.preventDefault();
